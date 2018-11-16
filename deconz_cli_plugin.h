@@ -42,6 +42,7 @@ public:
 public Q_SLOTS:
     void apsdeDataIndication(const deCONZ::ApsDataIndication &ind);
     void apsdeDataConfirm(const deCONZ::ApsDataConfirm &conf);
+    std::string getDeconzAddrString(const deCONZ::Address &address);
     std::string getApsIndSrcAddr(const deCONZ::ApsDataIndication &ind);
     const char *getClusterName(uint16_t clusterid);
     const char *getAttributeTypeIdName(uint8_t attrtypeid);
@@ -60,19 +61,20 @@ public Q_SLOTS:
     void clientDisconnected();
     void receiveCommand();
     void readReceivedBytes();
+    bool parseStringToAddr(char *inputString, deCONZ::Address &address);
     void writeToConnectedClients(char *data);
-    bool sendZclReadAttributeRequest(int shortaddr, int ep, int cluster, int attrid);
-    bool sendZclAttributeGenericRequest(int shortaddr, int ep, int cluster, QByteArray payload, int manu);
-    bool sendZclAttributeRequest(int shortaddr,	int ep, int cluster, QByteArray payload);
-    bool sendZclAttributeManuSpecRequest(int shortaddr, int ep, int cluster, QByteArray payload, int manu);
+    bool sendZclReadAttributeRequest(deCONZ::Address dstAddress, int ep, int cluster, int attrid);
+    bool sendZclAttributeGenericRequest(deCONZ::Address dstAddress, int ep, int cluster, QByteArray payload, int manu);
+    bool sendZclAttributeRequest(deCONZ::Address dstAddress, int ep, int cluster, QByteArray payload);
+    bool sendZclAttributeManuSpecRequest(deCONZ::Address dstAddress, int ep, int cluster, QByteArray payload, int manu);
     bool sendZclCmdGenericRequest(deCONZ::Address dstAddress, uint8_t ep, uint16_t cluster, QByteArray payload, int manu);
     bool sendZclCmdRequest(deCONZ::Address dstAddress, uint8_t ep, uint16_t cluster, QByteArray payload);
     bool sendZclCmdManuSpecRequest(deCONZ::Address dstAddress, uint8_t ep, uint16_t cluster, QByteArray payload, int manu);
     bool sendZclDefaultResponse(const deCONZ::ApsDataIndication &ind, const deCONZ::ZclFrame &zclFrame, quint8 status);
     bool sendZdpMatchCmdRequest(int profile, int cluster);
-    bool sendZdpPermitJoinCmdRequest(int shortaddr);
+    bool sendZdpPermitJoinCmdRequest(deCONZ::Address dstAddress);
     bool sendZdpCmdRequest(deCONZ::Address dstAddress, uint16_t cluster, QByteArray asdu);
-    bool sendZclTimeAttributes(int shortaddr, int ep);
+    bool sendZclTimeAttributes(deCONZ::Address dstAddress, int ep);
     void get_dst_start_end(int finddst /* 0 or 1 */, time_t *time_dst_start, time_t *time_dst_end, int *time_dst_shift);
     void get_dst(time_t *time_dst_start, time_t *time_dst_end, int *time_dst_shift);
     long get_epoch_since_2000(time_t tinput);
@@ -85,7 +87,7 @@ private:
     QTcpServer *tcpServer;
     QList<QTcpSocket *> clientConnection;
     quint8 m_zclSeq; //!< ZCL sequence number of Zcl_req
-    int m_shortaddr; //!< short address
+    deCONZ::Address m_address; //!< address
     int m_ep; //!< endpoint id
     int m_attrid; //!< attribute id
     int m_profile;

@@ -131,18 +131,18 @@ Run netcat to connect to port 5008. Type `help` to show usage.
 
 Command | Description 
 ------- | ----------- 
-`r <shortaddr> <ep> <cluster> <attrid>` | read attributes
-`b <shortaddr> <ep>` | read basic attributes 
-`b <shortaddr> <ep> <cluster>` | read basic attributes on cluster
+`r <shortOrLongAddr> <ep> <cluster> <attrid>` | read attributes
+`b <shortOrLongAddr> <ep>` | read basic attributes 
+`b <shortOrLongAddr> <ep> <cluster>` | read basic attributes on cluster
 `m <profile> <cluster>` | send match descriptor request (discover cluster)
-`p <shortaddr>` | permit Joining on device (coordinator = 0)
-`zclattr <shortaddr> <ep> <cluster> <command>` | send ZCL attribute request 
-`zclcmd <shortaddr> <ep> <cluster> <command>`  | send ZCL command request 
+`p <shortOrLongAddr>` | permit Joining on device (coordinator = 0)
+`zclattr <shortOrLongAddr> <ep> <cluster> <command>` | send ZCL attribute request 
+`zclcmd <shortOrLongAddr> <ep> <cluster> <command>`  | send ZCL command request 
 `zclcmdgrp <groupaddr> <ep> <cluster> <command>` | send ZCL command request to group 
-`zdpcmd <shortaddr> <cluster> <command>` | send ZDP command request 
-`zclattrmanu <shortaddr> <ep> <cluster> <manufacturer id> <command>` | send ZCL attribute request manufacturer specific
-`zclcmdmanu <shortaddr> <ep> <cluster> <manufacturer id> <command>`  | send ZCL command request manufacturer specific
-`sendtime <shortaddr> <ep>` | send ZCL time attributes to Time_Cluster 0x000A
+`zdpcmd <shortOrLongAddr> <cluster> <command>` | send ZDP command request 
+`zclattrmanu <shortOrLongAddr> <ep> <cluster> <manufacturer id> <command>` | send ZCL attribute request manufacturer specific
+`zclcmdmanu <shortOrLongAddr> <ep> <cluster> <manufacturer id> <command>`  | send ZCL command request manufacturer specific
+`sendtime <shortOrLongAddr> <ep>` | send ZCL time attributes to Time_Cluster 0x000A
 
 
 Response | Description

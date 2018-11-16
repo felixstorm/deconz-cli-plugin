@@ -34,7 +34,7 @@ CliPlugin::CliPlugin(QObject *parent) : QObject(parent) {
     m_readattr = false;
     m_readclust = 0;
     m_zdpmatchreq = false;
-    m_shortaddr = 0;
+    m_address.clear();
     m_attrid = -1;
     m_cluster = 0;
     m_profile = 0;
@@ -213,6 +213,24 @@ void CliPlugin::apsdeDataConfirm(const deCONZ::ApsDataConfirm &conf) {
             return;
         }
     }
+}
+
+/*! get deCONZ address in 64-Bit or 16-Bit as string
+ */
+std::string CliPlugin::getDeconzAddrString(const deCONZ::Address &address) {
+	char straddr[26];
+	if (address.hasNwk() && address.hasExt()) { //!< both
+		sprintf(straddr, "0x%04X/0x%016llX", address.nwk(), address.ext());
+		return std::string(straddr);
+	} else if (address.hasExt()) {              //!< 64-bit extended IEEE address mode
+		sprintf(straddr, "0x%016llX", address.ext());
+		return std::string(straddr);
+	} else if (address.hasNwk()) {              //!< 16-bit short network address mode
+		sprintf(straddr, "0x%04X", address.nwk());
+		return std::string(straddr);
+	}
+
+	return std::string();  // empty string
 }
 
 /*! get APS Ind source address in 64-Bit or 16-Bit string
@@ -700,8 +718,8 @@ void CliPlugin::handleZclReadAttrbuteResponse(const deCONZ::ApsDataIndication &i
 	if (zclframe.payload().length() > 3) {
 		uint8_t type = *respvalue++; // ZCL attribute typeid
 		if (m_readattr && ind.clusterId() == 0x0000 && m_zclSeq == zclframe.sequenceNumber()) {
-			snprintf(strout, MAX_STR, "<-ZCL attr 0x%04X %d 0x%04X 0x%04X ",
-					m_shortaddr, ind.srcEndpoint(), m_readclust, *attrid);
+			snprintf(strout, MAX_STR, "<-ZCL attr %s %d 0x%04X 0x%04X ",
+					getDeconzAddrString(m_address).c_str(), ind.srcEndpoint(), m_readclust, *attrid);
 		} else {
 			snprintf(strout, MAX_STR, "<-APS attr %s %d 0x%04X 0x%04X 0x%02X ",
 					getApsIndSrcAddr(ind).c_str(), ind.srcEndpoint(), ind.clusterId(), *attrid, type);
@@ -721,8 +739,8 @@ void CliPlugin::handleZclReadAttrbuteResponse(const deCONZ::ApsDataIndication &i
 		}
 	} else { // error
 		if (m_readattr && ind.clusterId() == 0x0000 && m_zclSeq == zclframe.sequenceNumber()) {
-			snprintf(strout, MAX_STR, "<-ZCL attr 0x%04X %d 0x%04X 0x%04X unknown",
-					m_shortaddr, ind.srcEndpoint(), m_readclust, *attrid);
+			snprintf(strout, MAX_STR, "<-ZCL attr %s %d 0x%04X 0x%04X unknown",
+					getDeconzAddrString(m_address).c_str(), ind.srcEndpoint(), m_readclust, *attrid);
 		} else {
 			writestrout = false;
 			snprintf(strout, MAX_STR, "APS attr %s %d 0x%04X 0x%04X error ",
@@ -742,10 +760,10 @@ void CliPlugin::handleZclReadAttrbuteResponse(const deCONZ::ApsDataIndication &i
 			&& m_zclSeq == zclframe.sequenceNumber()) {
 		if (m_attrid < MAX_ATTR) {
 			m_attrid++;
-			sendZclReadAttributeRequest(m_shortaddr, m_ep, 0x0000, m_attrid);
+			sendZclReadAttributeRequest(m_address, m_ep, 0x0000, m_attrid);
 		} else if (m_attrid != 0x4000) {
 			m_attrid = 0x4000;
-			sendZclReadAttributeRequest(m_shortaddr, m_ep, 0x0000, m_attrid);
+			sendZclReadAttributeRequest(m_address, m_ep, 0x0000, m_attrid);
 		} else {
 			m_readattr = false;
 			m_readclust = 0;
@@ -959,27 +977,26 @@ void CliPlugin::readReceivedBytes() {
 	}
 	writeToConnectedClients(data);
 
+	char targetaddrstring[MAX_STR];
+	memset(targetaddrstring, '\0', MAX_STR);
 	char command[MAX_STR];
 	memset(command, '\0', MAX_STR);
 	int shortaddr = -1, profile = -1, ep = -1, cluster = -1, attrid = -1, manu = 0;
 
-	if (sscanf(data, "r %x %d %x %x", &shortaddr, &ep, &cluster, &attrid)  == 4) {
-		DBG_Printf(DBG_INFO, "read attribute on  %x %d %x %x\n", shortaddr, ep, cluster, attrid);
-		result = sendZclReadAttributeRequest(shortaddr, ep, cluster, attrid);
+	if (sscanf(data, "r %s %d %x %x", targetaddrstring, &ep, &cluster, &attrid)  == 4 && parseStringToAddr(targetaddrstring, addr)) {
+		DBG_Printf(DBG_INFO, "read attribute on  %s %d %x %x\n", getDeconzAddrString(addr).c_str(), ep, cluster, attrid);
+		result = sendZclReadAttributeRequest(addr, ep, cluster, attrid);
 	}
-	if (sscanf(data, "zclattr %x %d %x %s", &shortaddr, &ep, &cluster, command)  == 4) {
-		DBG_Printf(DBG_INFO, "zclattr on  %x %d %x %s\n", shortaddr, ep, cluster, command);
-		addr.setNwk(shortaddr);
-		result = sendZclAttributeRequest(shortaddr, ep, cluster, QByteArray::fromHex(command));
+	if (sscanf(data, "zclattr %s %d %x %s", targetaddrstring, &ep, &cluster, command)  == 4 && parseStringToAddr(targetaddrstring, addr)) {
+		DBG_Printf(DBG_INFO, "zclattr on  %s %d %x %s\n", getDeconzAddrString(addr).c_str(), ep, cluster, command);
+		result = sendZclAttributeRequest(addr, ep, cluster, QByteArray::fromHex(command));
 	}
-	if (sscanf(data, "zclattrmanu %x %d %x %x %s", &shortaddr, &ep, &cluster, &manu, command)  == 5) {
-		DBG_Printf(DBG_INFO, "zclattrmanu on  %x %d %x %x %s\n", shortaddr, ep, cluster, manu, command);
-		addr.setNwk(shortaddr);
-		result = sendZclAttributeManuSpecRequest(shortaddr, ep, cluster, QByteArray::fromHex(command), manu);
+	if (sscanf(data, "zclattrmanu %s %d %x %x %s", targetaddrstring, &ep, &cluster, &manu, command)  == 5 && parseStringToAddr(targetaddrstring, addr)) {
+		DBG_Printf(DBG_INFO, "zclattrmanu on  %s %d %x %x %s\n", getDeconzAddrString(addr).c_str(), ep, cluster, manu, command);
+		result = sendZclAttributeManuSpecRequest(addr, ep, cluster, QByteArray::fromHex(command), manu);
 	}
-	if (sscanf(data, "zclcmd %x %d %x %s", &shortaddr, &ep, &cluster, command)  == 4) {
-		DBG_Printf(DBG_INFO, "zclcmd on  %x %d %x %s\n", shortaddr, ep, cluster, command);
-		addr.setNwk(shortaddr);
+	if (sscanf(data, "zclcmd %s %d %x %s", targetaddrstring, &ep, &cluster, command)  == 4 && parseStringToAddr(targetaddrstring, addr)) {
+		DBG_Printf(DBG_INFO, "zclcmd on  %s %d %x %s\n", getDeconzAddrString(addr).c_str(), ep, cluster, command);
 		result = sendZclCmdRequest(addr, ep, cluster, QByteArray::fromHex(command));
 	}
 	if (sscanf(data, "zclcmdgrp %x %d %x %s", &shortaddr, &ep, &cluster, command)  == 4) {
@@ -987,41 +1004,38 @@ void CliPlugin::readReceivedBytes() {
 		addr.setGroup(shortaddr);
 		result = sendZclCmdRequest(addr, ep, cluster, QByteArray::fromHex(command));
 	}
-	if (sscanf(data, "zclcmdmanu %x %d %x %x %s", &shortaddr, &ep, &cluster, &manu, command)  == 5) {
-		DBG_Printf(DBG_INFO, "zclcmdmanu on  %x %d %x %s\n", shortaddr, ep, cluster, command, manu);
-		addr.setNwk(shortaddr);
+	if (sscanf(data, "zclcmdmanu %s %d %x %x %s", targetaddrstring, &ep, &cluster, &manu, command)  == 5 && parseStringToAddr(targetaddrstring, addr)) {
+		DBG_Printf(DBG_INFO, "zclcmdmanu on  %s %d %x %x %s\n", getDeconzAddrString(addr).c_str(), ep, cluster, manu, command);
 		result = sendZclCmdManuSpecRequest(addr, ep, cluster, QByteArray::fromHex(command), manu);
 	}
-	if (sscanf(data, "b %x %d %x", &shortaddr, &ep, &cluster)  == 3) {
-		DBG_Printf(DBG_INFO, "read basic attributes on %x %d 0x%04X\n", shortaddr, ep, cluster);
-		m_readclust = cluster;
+	if (sscanf(data, "b %s %d %x", targetaddrstring, &ep, &cluster)  == 3 && parseStringToAddr(targetaddrstring, addr)) {
+		DBG_Printf(DBG_INFO, "read basic attributes on %s %d 0x%04X\n", getDeconzAddrString(addr).c_str(), ep, cluster);
 	}
-	if (sscanf(data, "b %x %d", &shortaddr, &ep)  == 2) {
-		DBG_Printf(DBG_INFO, "read basic attributes on %x %d\n", shortaddr, ep);
+	if (sscanf(data, "b %s %d", targetaddrstring, &ep)  == 2 && parseStringToAddr(targetaddrstring, addr)) {
+		DBG_Printf(DBG_INFO, "read basic attributes on %s %d\n", getDeconzAddrString(addr).c_str(), ep);
 		m_readattr = true;
-		m_shortaddr = shortaddr;
+		m_address = addr;
 		m_ep = ep;
 		m_attrid = 0x0004; // start attribute id 0x0004
 		cluster = 0x0000;  // Basic Cluster Id
 		attrid = m_attrid;
-		result = sendZclReadAttributeRequest(shortaddr, ep, cluster, attrid);
+		result = sendZclReadAttributeRequest(addr, ep, cluster, attrid);
 	}
 	if (sscanf(data, "m %x %x", &profile, &cluster)  == 2) {
 		DBG_Printf(DBG_INFO, "zdp match request on cluster  %x\n", cluster);
 		result = sendZdpMatchCmdRequest(profile, cluster);
 	}
-	if (sscanf(data, "p %x", &shortaddr)  == 1) {
-		DBG_Printf(DBG_INFO, "permit join on %x\n", shortaddr);
-		result = sendZdpPermitJoinCmdRequest(shortaddr);
+	if (sscanf(data, "p %s", targetaddrstring)  == 1 && parseStringToAddr(targetaddrstring, addr)) {
+		DBG_Printf(DBG_INFO, "permit join on %s\n", getDeconzAddrString(addr).c_str());
+		result = sendZdpPermitJoinCmdRequest(addr);
 	}
-	if (sscanf(data, "zdpcmd %x %x %s", &shortaddr, &cluster, command)  == 3) {
-		DBG_Printf(DBG_INFO, "ZDP request on 0x%04X, commandId = 0x%04X, payload = %s\n", shortaddr, cluster, command);
-		addr.setNwk(shortaddr);
+	if (sscanf(data, "zdpcmd %s %x %s", targetaddrstring, &cluster, command)  == 3 && parseStringToAddr(targetaddrstring, addr)) {
+		DBG_Printf(DBG_INFO, "ZDP request on %s, commandId = 0x%04X, payload = %s\n", getDeconzAddrString(addr).c_str(), cluster, command);
 		result = sendZdpCmdRequest(addr, (uint16_t) cluster, QByteArray::fromHex(command));
 	}
-	if (sscanf(data, "sendtime %x %d", &shortaddr, &ep)  == 2) {
-		DBG_Printf(DBG_INFO, "send time to shortaddr = %x, ep = %d\n", shortaddr, ep);
-		result = sendZclTimeAttributes(shortaddr, ep);
+	if (sscanf(data, "sendtime %s %d", targetaddrstring, &ep)  == 2 && parseStringToAddr(targetaddrstring, addr)) {
+		DBG_Printf(DBG_INFO, "send time to addr = %s, ep = %d\n", getDeconzAddrString(addr).c_str(), ep);
+		result = sendZclTimeAttributes(addr, ep);
 	}
 	if (strstr(data, "help") != NULL) {
 		printhelp();
@@ -1036,6 +1050,11 @@ void CliPlugin::readReceivedBytes() {
 	writeToConnectedClients(data);
 }
 
+bool CliPlugin::parseStringToAddr(char *inputString, deCONZ::Address &address)
+{
+	return address.fromStringNwk(inputString) || address.fromStringExt(inputString);
+}
+
 /*! Write to connected clients
  */
 void CliPlugin::writeToConnectedClients(char *data) {
@@ -1047,13 +1066,13 @@ void CliPlugin::writeToConnectedClients(char *data) {
 /*! Send ZCL Read Attribute Request
    \return true if request was added to queue
  */
-bool CliPlugin::sendZclReadAttributeRequest(int shortaddr, int ep, int cluster, int attrid) {
+bool CliPlugin::sendZclReadAttributeRequest(deCONZ::Address dstAddress, int ep, int cluster, int attrid) {
 	QByteArray payload;
 	QDataStream zclstream(&payload, QIODevice::WriteOnly);
 	zclstream.setByteOrder(QDataStream::LittleEndian);
 	zclstream << (qint8) deCONZ::ZclReadAttributesId;
 	zclstream << (quint16) attrid; // Attribute ID
-	return sendZclAttributeRequest(shortaddr, ep, cluster, payload);
+	return sendZclAttributeRequest(dstAddress, ep, cluster, payload);
 }
 
 //     General ZCL command ids every cluster shall support.
@@ -1079,7 +1098,7 @@ bool CliPlugin::sendZclReadAttributeRequest(int shortaddr, int ep, int cluster, 
  *  with or without Manufacturer Specific Attributes
    \return true if request was added to queue
  */
-bool CliPlugin::sendZclAttributeGenericRequest(int shortaddr, int ep, int cluster, QByteArray payload, int manu) {
+bool CliPlugin::sendZclAttributeGenericRequest(deCONZ::Address dstAddress, int ep, int cluster, QByteArray payload, int manu) {
     char strtmp[TMP_STR];
     int rc = -1;
 
@@ -1112,8 +1131,16 @@ bool CliPlugin::sendZclAttributeGenericRequest(int shortaddr, int ep, int cluste
 	deCONZ::ApsDataRequest apsReq;
 
 	// set destination addressing
+	if (dstAddress.hasNwk()) {
 	apsReq.setDstAddressMode(deCONZ::ApsNwkAddress);
-	apsReq.dstAddress().setNwk(shortaddr);
+		apsReq.dstAddress().setNwk(dstAddress.nwk());
+	} else if (dstAddress.hasGroup()) {
+		apsReq.setDstAddressMode(deCONZ::ApsGroupAddress);
+		apsReq.dstAddress().setGroup(dstAddress.group());
+	} else if (dstAddress.hasExt()) {
+		apsReq.setDstAddressMode(deCONZ::ApsExtAddress);
+		apsReq.dstAddress().setExt(dstAddress.ext());
+	}
 	apsReq.setDstEndpoint(ep);
 	apsReq.setSrcEndpoint(0x01);  // Source Endpoint 0x01
 	apsReq.setProfileId(HA_PROFILE_ID);
@@ -1140,8 +1167,8 @@ bool CliPlugin::sendZclAttributeGenericRequest(int shortaddr, int ep, int cluste
 		snprintf(rawtmp, 4, "%02X ", asdudata);
 		strcat(rawstr, rawtmp);
 	}
-	DBG_Printf(DBG_INFO, "APS Req id 0x%02X %d profile 0x%04X %s, shortaddr = 0x%04X, ep = %d\n",
-			apsReq.id(), length, apsReq.profileId(), rawstr, shortaddr, ep);
+	DBG_Printf(DBG_INFO, "APS Req id 0x%02X %d profile 0x%04X %s, addr = %s, ep = %d\n",
+			apsReq.id(), length, apsReq.profileId(), rawstr, getDeconzAddrString(dstAddress).c_str(), ep);
 
 	if (m_apsCtrl && ((rc = m_apsCtrl->apsdeDataRequest(apsReq)) == deCONZ::Success)) {
 		// remember request
@@ -1171,15 +1198,15 @@ bool CliPlugin::sendZclAttributeGenericRequest(int shortaddr, int ep, int cluste
 /*! Send ZCL Attribute Request ProfileCommand (Read / Write / Report configuration)
    \return true if request was added to queue
  */
-bool CliPlugin::sendZclAttributeRequest(int shortaddr, int ep, int cluster, QByteArray payload) {
-	return sendZclAttributeGenericRequest(shortaddr, ep, cluster, payload, 0);
+bool CliPlugin::sendZclAttributeRequest(deCONZ::Address dstAddress, int ep, int cluster, QByteArray payload) {
+	return sendZclAttributeGenericRequest(dstAddress, ep, cluster, payload, 0);
 }
 
 /*! Send ZCL Attribute Manufacturer Specific Request ProfileCommand (Read / Write / Report configuration)
    \return true if request was added to queue
  */
-bool CliPlugin::sendZclAttributeManuSpecRequest(int shortaddr, int ep, int cluster, QByteArray payload, int manu) {
-	return sendZclAttributeGenericRequest(shortaddr, ep, cluster, payload, manu);
+bool CliPlugin::sendZclAttributeManuSpecRequest(deCONZ::Address dstAddress, int ep, int cluster, QByteArray payload, int manu) {
+	return sendZclAttributeGenericRequest(dstAddress, ep, cluster, payload, manu);
 }
 
 /*! Send ZCL Request ClusterCommand (Send Command)
@@ -1390,9 +1417,7 @@ bool CliPlugin::sendZdpMatchCmdRequest(int profile, int cluster) {
 /*! Send ZDP Permit Join Request
    \return true if request was added to queue
  */
-bool CliPlugin::sendZdpPermitJoinCmdRequest(int shortaddr) {
-	deCONZ::Address dstAddress;
-	dstAddress.setNwk(shortaddr);
+bool CliPlugin::sendZdpPermitJoinCmdRequest(deCONZ::Address dstAddress) {
 	uint16_t zdpcommand = ZDP_MGMT_PERMIT_JOINING_REQ_CLID; //ZDP_MATCH_DESCRIPTOR_CLID;
 	QByteArray asdu;
 	QDataStream stream(&asdu, QIODevice::WriteOnly);
@@ -1468,7 +1493,7 @@ bool CliPlugin::sendZdpCmdRequest(deCONZ::Address dstAddress, uint16_t zdpcomman
  *  TimeZone 0x0002 , DstStart 0x0003, DstEnd 0x0004, DstShift 0x0005
  *  \return true if request was added to queue
  */
-bool CliPlugin::sendZclTimeAttributes(int shortaddr, int ep) {
+bool CliPlugin::sendZclTimeAttributes(deCONZ::Address dstAddress, int ep) {
 	time_t time_dst_start, time_dst_end, time_now, time_utc_2000;
 	int time_dst_shift, time_gmt_offset;
 	int x;
@@ -1536,7 +1561,7 @@ bool CliPlugin::sendZclTimeAttributes(int shortaddr, int ep) {
 	zclstream << (quint8) 0x2B;     // Attribute Type 0x2B
 	zclstream << (qint32) dstshift; // Daylight Saving Time Shift
 
-	return sendZclAttributeRequest(shortaddr, ep, cluster, zclpayload);
+	return sendZclAttributeRequest(dstAddress, ep, cluster, zclpayload);
 }
 
 /*! get dst daylight saving start, end, shift
@@ -1628,17 +1653,17 @@ int CliPlugin::get_gmtdiff() {
 void CliPlugin::printhelp() {
 	char data[MAX_STR];
 	int x = 0;
-	x += snprintf(&data[x], MAX_STR - x, "r <shortaddr> <ep> <cluster> <attrid>       \tread attributes\n");
-	x += snprintf(&data[x], MAX_STR - x, "b <shortaddr> <ep>                          \tread basic attributes\n");
-	x += snprintf(&data[x], MAX_STR - x, "b <shortaddr> <ep> <cluster>                \tread basic attributes on cluster\n");
+	x += snprintf(&data[x], MAX_STR - x, "r <shortOrLongAddr> <ep> <cluster> <attrid>       \tread attributes\n");
+	x += snprintf(&data[x], MAX_STR - x, "b <shortOrLongAddr> <ep>                          \tread basic attributes\n");
+	x += snprintf(&data[x], MAX_STR - x, "b <shortOrLongAddr> <ep> <cluster>                \tread basic attributes on cluster\n");
 	x += snprintf(&data[x], MAX_STR - x, "m <profile> <cluster>                       \tsend match descriptor request (discover cluster)\n");
-	x += snprintf(&data[x], MAX_STR - x, "p <shortaddr>                               \tpermit Joining on device (coordinator = 0)\n");
-	x += snprintf(&data[x], MAX_STR - x, "zclattr <shortaddr> <ep> <cluster> <command>\tsend ZCL attribute request\n");
-	x += snprintf(&data[x], MAX_STR - x, "zclcmd <shortaddr> <ep> <cluster> <command>\tsend ZCL command request\n");
+	x += snprintf(&data[x], MAX_STR - x, "p <shortOrLongAddr>                               \tpermit Joining on device (coordinator = 0)\n");
+	x += snprintf(&data[x], MAX_STR - x, "zclattr <shortOrLongAddr> <ep> <cluster> <command>\tsend ZCL attribute request\n");
+	x += snprintf(&data[x], MAX_STR - x, "zclcmd <shortOrLongAddr> <ep> <cluster> <command>\tsend ZCL command request\n");
 	x += snprintf(&data[x], MAX_STR - x, "zclcmdgrp <groupaddr> <ep> <cluster> <command>\tsend ZCL command request to group\n");
-	x += snprintf(&data[x], MAX_STR - x, "zdpcmd <shortaddr> <cluster> <command>      \tsend ZDP command request\n");
-	x += snprintf(&data[x], MAX_STR - x, "zclattrmanu <shortaddr> <ep> <cluster> <manufacturer id> <command>\tsend ZCL attribute request manufacturer specific\n");
-	x += snprintf(&data[x], MAX_STR - x, "zclcmdmanu <shortaddr> <ep> <cluster> <manufacturer id> <command>\tsend ZCL command request manufacturer specific\n");
+	x += snprintf(&data[x], MAX_STR - x, "zdpcmd <shortOrLongAddr> <cluster> <command>      \tsend ZDP command request\n");
+	x += snprintf(&data[x], MAX_STR - x, "zclattrmanu <shortOrLongAddr> <ep> <cluster> <manufacturer id> <command>\tsend ZCL attribute request manufacturer specific\n");
+	x += snprintf(&data[x], MAX_STR - x, "zclcmdmanu <shortOrLongAddr> <ep> <cluster> <manufacturer id> <command>\tsend ZCL command request manufacturer specific\n");
 
 	writeToConnectedClients(data);
 }
